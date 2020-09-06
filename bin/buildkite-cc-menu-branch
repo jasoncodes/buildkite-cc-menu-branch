@@ -1,0 +1,59 @@
+#!/usr/bin/env ruby
+
+require 'webrick'
+require 'shellwords'
+require 'net/http'
+require 'nokogiri'
+
+request = WEBrick::HTTPRequest.new(WEBrick::Config::HTTP)
+request.parse(ARGF)
+
+project_name = File.basename(request.path, '.xml')
+project_git_dir = File.expand_path("~/projects/#{project_name}/.git")
+
+unless Dir.exist?(project_git_dir)
+  response = WEBrick::HTTPResponse.new(WEBrick::Config::HTTP)
+  response['Server'] = 'buildkite-cc-menu-branch'
+  response.status = 404
+  response.body = "Project not found.\n"
+  response.send_response STDOUT
+  exit
+end
+
+branch_name = `git --git-dir=#{Shellwords.escape project_git_dir} symbolic-ref --short -q HEAD`.chomp
+unless $?.success? && !branch_name.empty?
+  response = WEBrick::HTTPResponse.new(WEBrick::Config::HTTP)
+  response['Server'] = 'buildkite-cc-menu-branch'
+  response.status = 500
+  response.body = "Error reading current branch for project.\n"
+  response.send_response STDOUT
+  exit
+end
+
+uri = URI.parse('https://cc.buildkite.com/')
+uri.path = request.path
+uri.query = URI.encode_www_form(request.query.merge(branch: branch_name))
+
+bk_response = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == 'https') do |http|
+  request = Net::HTTP::Get.new uri
+  http.request(request)
+end
+
+response = WEBrick::HTTPResponse.new(WEBrick::Config::HTTP)
+response.status = bk_response.code
+response['Server'] = 'buildkite-cc-menu-branch'
+response['Content-Type'] = bk_response['Content-Type']
+response.body = bk_response.body
+
+if bk_response.is_a? Net::HTTPOK
+  doc = Nokogiri.parse(response.body)
+  doc.xpath('/Projects/Project').each do |project|
+    if project[:name] == "#{project_name} (#{branch_name})"
+      project[:name] = "#{project_name} (branch)"
+      project[:lastBuildLabel] = "#{branch_name} #{project[:lastBuildLabel]}"
+    end
+  end
+  response.body = doc.to_xml
+end
+
+response.send_response STDOUT
