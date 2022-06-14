@@ -9,9 +9,9 @@ request = WEBrick::HTTPRequest.new(WEBrick::Config::HTTP)
 request.parse(ARGF)
 
 project_name = File.basename(request.path, '.xml')
-project_git_dir = File.expand_path("~/projects/#{project_name}/.git")
+project_dir = File.expand_path("~/projects/#{project_name}")
 
-unless Dir.exist?(project_git_dir)
+unless Dir.exist?(project_dir)
   response = WEBrick::HTTPResponse.new(WEBrick::Config::HTTP)
   response['Server'] = 'buildkite-cc-menu-branch'
   response.status = 404
@@ -20,7 +20,7 @@ unless Dir.exist?(project_git_dir)
   exit
 end
 
-branch_name = `git --git-dir=#{Shellwords.escape project_git_dir} symbolic-ref --short -q HEAD`.chomp
+branch_name = `git -C #{Shellwords.escape project_dir} symbolic-ref --short -q HEAD`.chomp
 unless $?.success? && !branch_name.empty?
   response = WEBrick::HTTPResponse.new(WEBrick::Config::HTTP)
   response['Server'] = 'buildkite-cc-menu-branch'
