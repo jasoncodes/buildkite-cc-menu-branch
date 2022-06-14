@@ -8,8 +8,9 @@ require 'nokogiri'
 request = WEBrick::HTTPRequest.new(WEBrick::Config::HTTP)
 request.parse(ARGF)
 
-project_name = File.basename(request.path, '.xml')
-project_dir = File.expand_path("~/projects/#{project_name}")
+buildkite_name = File.basename(request.path, '.xml')
+local_name = request.query.fetch('name', buildkite_name)
+project_dir = File.expand_path("~/projects/#{local_name}")
 
 unless Dir.exist?(project_dir)
   response = WEBrick::HTTPResponse.new(WEBrick::Config::HTTP)
@@ -32,7 +33,7 @@ end
 
 uri = URI.parse('https://cc.buildkite.com/')
 uri.path = request.path
-uri.query = URI.encode_www_form(request.query.merge(branch: branch_name))
+uri.query = URI.encode_www_form(request.query.merge(name: nil, branch: branch_name).compact)
 
 bk_response = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == 'https') do |http|
   request = Net::HTTP::Get.new uri
@@ -48,8 +49,8 @@ response.body = bk_response.body
 if bk_response.is_a? Net::HTTPOK
   doc = Nokogiri.parse(response.body)
   doc.xpath('/Projects/Project').each do |project|
-    if project[:name] == "#{project_name} (#{branch_name})"
-      project[:name] = "#{project_name} (branch)"
+    if project[:name] == "#{buildkite_name} (#{branch_name})"
+      project[:name] = "#{local_name} (branch)"
       project[:lastBuildLabel] = "#{branch_name} #{project[:lastBuildLabel]}"
     end
   end
